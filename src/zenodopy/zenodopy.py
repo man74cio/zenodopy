@@ -326,9 +326,9 @@ class Client(object):
                     status['submitted'] = 'published'
                 else:
                     status['submitted'] = 'unpublished'
-                
+
                 status["latest"] = self._get_latest_record(file['id'])
-                    
+
                 print(f"{file['title']} ---- {file['id']} ---- {status['submitted']} ---- {status['latest']}")
         else:
             print(' ** need to setup ~/.zenodo_token file ** ')
@@ -393,8 +393,10 @@ class Client(object):
         else:
             print("** Project not created, something went wrong. Check that your ACCESS_TOKEN is in ~/.zenodo_token ")
 
-    def set_project(self, dep_id=None):
+    def set_project(self,dep_id: int):
         '''set the project by id'''
+
+        # get all projects 
         projects = self._get_depositions()
 
         if projects is not None:
@@ -403,8 +405,10 @@ class Client(object):
                 self.title = project_list[0]['title']
                 self.bucket = self._get_bucket_by_id(dep_id)
                 self.deposition_id = dep_id
+            else:
+                print(f' ** Deposition ID: {dep_id} does not exist in your projects  ** ')
         else:
-            print(f' ** Deposition ID: {dep_id} does not exist in your projects  ** ')
+            print(f' ** You do not have any project  ** ')
 
     def change_metadata(self, dep_id=None,
                         title=None,
@@ -437,7 +441,7 @@ class Client(object):
 
         if description is None:
             description = "description goes here"
-        
+
         if creator is None:
             creator = "creator goes here"
 
@@ -450,7 +454,7 @@ class Client(object):
             }
         }
         # update metadata with a new metadata dictionary
-        data.update(kwargs) 
+        data.update(kwargs)
 
         r = requests.put(f"{self._endpoint}/deposit/depositions/{dep_id}",
                          auth=self._bearer_auth,
@@ -477,7 +481,7 @@ class Client(object):
 
         if self.bucket is None:
             print("You need to create a project with zeno.create_project() "
-                  "or set a project zeno.set_project() before uploading a file") 
+                  "or set a project zeno.set_project() before uploading a file")
         else:
             bucket_link = self.bucket
 
@@ -489,15 +493,15 @@ class Client(object):
                                  data=fp,)
 
                 print(f"{file_path} successfully uploaded!") if r.ok else print("Oh no! something went wrong")
-            
+
             if publish:
                 return self.publish()
 
     def upload_zip(self, source_dir=None, output_file=None, publish=False):
         """upload a directory to a project as zip
 
-        This will: 
-            1. zip the directory, 
+        This will:
+            1. zip the directory,
             2. upload the zip directory to your project
             3. remove the zip file from your local machine
 
@@ -554,8 +558,8 @@ class Client(object):
     def upload_tar(self, source_dir=None, output_file=None, publish=False):
         """upload a directory to a project
 
-        This will: 
-            1. tar the directory, 
+        This will:
+            1. tar the directory,
             2. upload the tarred directory to your project
             3. remove the tar file from your local machine
 
@@ -631,7 +635,7 @@ class Client(object):
         # invoke upload funcions
         if not source:
             print("You need to supply a path")
-        
+
         if Path(source).exists():
             if Path(source).is_file():
                 self.upload_file(source, publish=publish)
@@ -644,7 +648,7 @@ class Client(object):
                     self.upload_tar(source, output_file, publish=publish)
         else:
             raise FileNotFoundError(f"{source} does not exist")
-        
+
     def publish(self):
         """ publish a record
         """
@@ -674,16 +678,16 @@ class Client(object):
                 # else download to set dst_path
                 if dst_path:
                     if os.path.isdir(dst_path):
-                        filename = dst_path + '/' + filename 
+                        filename = dst_path + '/' + filename
                     else:
                         raise FileNotFoundError(f'{dst_path} does not exist')
-                        
+
                 if r.ok:
                     with open(filename, 'wb') as f:
-                        f.write(r.content)                    
+                        f.write(r.content)
                 else:
                     print(f" ** Something went wrong, check that {filename} is in your poject  ** ")
-                    
+
             else:
                 print(f' ** {bucket_link}/{filename} is not a valid URL ** ')
 
@@ -732,7 +736,7 @@ class Client(object):
 
     def _get_latest_record(self, record_id=None):
         """return the latest record id for given record id
-        
+
         Args:
             record_id (str or int): the record id you known. Defaults to None.
 
@@ -777,3 +781,29 @@ class Client(object):
         self.deposition_id = None
         # else:
         #    print(f'Project title {self.title} is still available.')
+
+
+    def _get_metadata(self, deposition_id=None):
+        if deposition_id is None :
+            deposition_id = self.deposition_id
+        """
+        Retrieves the current metadata of a deposition on Zenodo.
+
+        Args:
+            deposition_id (str): The ID of the deposition.
+
+        Returns:
+            response (dict): The current metadata from the Zenodo API.
+        """
+
+        url = f"{self.bucket}/deposit/depositions/{deposition_id}"
+        headers = {"Authorization": f"Bearer {self.access_token}"}
+
+        # Fetch the existing metadata
+        response = requests.get(url, auth=self._bearer_auth)
+
+        if response.status_code == 200:
+            return response.json()["metadata"]
+        else:
+            print(f"Failed to fetch metadata. Status code: {response.status_code}")
+            return None
