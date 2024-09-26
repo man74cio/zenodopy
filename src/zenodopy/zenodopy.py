@@ -82,8 +82,10 @@ class Client(object):
         """initialization method"""
         if sandbox:
             self._endpoint = "https://sandbox.zenodo.org/api"
+            self._doi_pattern = r'^10\.5072/zenodo\.\d+$'
         else:
             self._endpoint = "https://zenodo.org/api"
+            self._doi_pattern = r'^10\.5281/zenodo\.\d+$'
 
         self.title = title
         self.bucket = bucket
@@ -91,6 +93,7 @@ class Client(object):
         self.sandbox = sandbox
         self._token = self._read_from_config if token is None else token
         self._bearer_auth = BearerAuth(self._token)
+        self.concept_id = None
         # 'metadata/prereservation_doi/doi'
 
     def __repr__(self):
@@ -187,7 +190,7 @@ class Client(object):
         else:
             return r.raise_for_status()
 
-    def _get_depositions_by_id(self, dep_id=None):
+    def _get_depositions_by_id(self, dep_id):
         """gets the deposition based on project id
 
         this provides details on the project, including metadata
@@ -225,28 +228,8 @@ class Client(object):
         else:
             return r.raise_for_status()
 
-    def _get_bucket_by_title(self, title=None):
-        """gets the bucket URL by project title
-
-        This URL is what you upload files to
-
-        Args:
-            title (str): project title
-
-        Returns:
-            str: the bucket URL to upload files to
-        """
-        dic = self.list_projects
-        dep_id = dic[title] if dic is not None else None
-
-        # get request, returns our response, this the records metadata
-        r = requests.get(f"{self._endpoint}/deposit/depositions/{dep_id}",
-                         auth=self._bearer_auth)
-
-        if r.ok:
-            return r.json()['links']['bucket']
-        else:
-            return r.raise_for_status()
+    #def _get_bucket_by_title(self, title=None):
+    # removed because it does not work correctly and unused
 
     def _get_bucket_by_id(self, dep_id=None):
         """gets the bucket URL by project deposition ID
@@ -318,20 +301,59 @@ class Client(object):
         tmp = self._get_depositions()
 
         if isinstance(tmp, list):
-            print('Project Name ---- ID ---- Status ---- Latest Published ID')
-            print('---------------------------------------------------------')
+            print('--- Project Name '+ '-'*28 + ' ID ------ CID - Status --- Latest ----- Published ID ' +'-'*10)
+            print('-'*109)
             for file in tmp:
                 status = {}  # just to rename the file outputs and deal with exceptions
                 if file['submitted']:
-                    status['submitted'] = 'published'
+                    status['submitted'] = 'Yes'
                 else:
-                    status['submitted'] = 'unpublished'
+                    status['submitted'] = 'No '
 
+                concept_id = self.get_conceptid_from_depo(file['id'])
                 status["latest"] = self._get_latest_record(file['id'])
 
-                print(f"{file['title']} ---- {file['id']} ---- {status['submitted']} ---- {status['latest']}")
+                out_string = f"{file['title']:35s}  {file['id']:9d}    {concept_id:9s} {status['submitted']:3s}      {status['latest']:6s} "
+
+                # associated deposition
+                start_string = ' * ' if str(self.deposition_id) == str(file['id']) else '   '
+
+                out_string =  start_string + out_string
+
+                if 'doi' in file: out_string += f"  DOI: {file['doi']}"
+                
+                print(out_string)
         else:
             print(' ** need to setup ~/.zenodo_token file ** ')
+        
+
+    def _is_published(self,deposition_id=None):
+        """
+        Property to retrieve if the deposition is published.
+
+        Returns:
+            published True (False): deposition is published (no)
+        """
+        if deposition_id is None :   deposition_id = self.deposition_id
+
+        url = f"{self._endpoint}/deposit/depositions/{deposition_id}"
+        
+        response = requests.get(url, auth=self._bearer_auth)
+        
+        if response.status_code == 200:
+            deposition_data = response.json()
+            if deposition_data['submitted']:
+                return True
+            else:
+                return False
+        else:
+            print(f"Failed to retrieve deposition status. Status code: {response.status_code}")
+            return None
+    
+    @property
+    def is_published(self):
+        return self._is_published()
+
 
     @property
     def list_files(self):
@@ -393,23 +415,20 @@ class Client(object):
         else:
             print("** Project not created, something went wrong. Check that your ACCESS_TOKEN is in ~/.zenodo_token ")
 
-    def set_project(self,dep_id: int):
+    def set_project(self,dep_id: str):
         '''set the project by id'''
 
         # get all projects 
-        projects = self._get_depositions()
+        projects = self._get_depositions_by_id(dep_id)
 
         if projects is not None:
-            project_list = [d for d in projects if d['id'] == int(dep_id)]
-            if len(project_list) > 0:
-                self.title = project_list[0]['title']
-                self.bucket = self._get_bucket_by_id(dep_id)
-                self.deposition_id = dep_id
-            else:
-                print(f' ** Deposition ID: {dep_id} does not exist in your projects  ** ')
+            self.title = projects['title']
+            self.bucket = self._get_bucket_by_id(dep_id)
+            self.deposition_id = dep_id
+            self.concept_id = projects["conceptrecid"]
         else:
-            print(f' ** You do not have any project  ** ')
-
+            print(f' ** Deposition ID: {dep_id} does not exist in your projects  ** ')
+       
     def change_metadata(self, dep_id=None,
                         title=None,
                         upload_type=None,
@@ -454,9 +473,11 @@ class Client(object):
             }
         }
         # update metadata with a new metadata dictionary
-        data.update(kwargs)
+        data['metadata'].update(kwargs)
 
-        r = requests.put(f"{self._endpoint}/deposit/depositions/{dep_id}",
+        url = f"{self._endpoint}/deposit/depositions/{dep_id}"
+        print(url)
+        r = requests.put(url,
                          auth=self._bearer_auth,
                          data=json.dumps(data),
                          headers={'Content-Type': 'application/json'})
@@ -471,7 +492,7 @@ class Client(object):
 
         Args:
             file_path (str): name of the file to upload
-            publish (bool): whether implemente publish action or not
+            publish (bool): whether implement publish action or not
         """
         if file_path is None:
             print("You need to supply a path")
@@ -490,12 +511,98 @@ class Client(object):
                 filename = file_path.split('/')[-1]
                 r = requests.put(f"{bucket_link}/{filename}",
                                  auth=self._bearer_auth,
-                                 data=fp,)
-
+                                 data=fp)
                 print(f"{file_path} successfully uploaded!") if r.ok else print("Oh no! something went wrong")
 
             if publish:
                 return self.publish()
+    
+
+
+    def update_zenodo_deposition(self,file_path, publish=False):
+        deposition_id = self.deposition_id
+        url = f"{self._endpoint}/deposit/depositions/"
+
+        # Step 1: Create a new version of the deposition
+        new_version_url = f"{url}/{deposition_id}/actions/newversion"
+        response = requests.post(new_version_url, auth=self._bearer_auth)
+
+        if response.status_code != 201:
+            raise Exception(f"Failed to create new version. Status code: {response.status_code}")
+
+
+        draft_data = response.json()
+        draft_id = draft_data['links']['latest_draft'].split('/')[-1]
+
+        # Step 2: Retrieve the file list of the new version
+        files_url = f"{url}/{draft_id}/files"
+        response = requests.get(files_url, auth=self._bearer_auth)
+
+        if response.status_code != 200:
+            raise Exception(f"Failed to retrieve file list. Status code: {response.status_code}")
+
+        files = response.json() 
+
+        # Step 3: Delete the old file (assuming there's only one file to update)
+        if files:
+            delete_url = f"{url}/{draft_id}/files/{files[0]['id']}"
+            response = requests.delete(delete_url, auth=self._bearer_auth)
+
+            if response.status_code != 204:
+                raise Exception(f"Failed to delete old file. Status code: {response.status_code}")  
+
+        # Step 4: Upload the new file
+        with open(file_path, 'rb') as file:
+            data = {'name': os.path.basename(file_path)}
+            files = {'file': file}
+            response = requests.post(files_url,auth=self._bearer_auth, data=data, files=files)
+
+            if response.status_code != 201:
+                raise Exception(f"Failed to upload new file. Status code: {response.status_code}")  
+
+
+        # Step 5: Update metadata (increment version number)
+        metadata_url = f"{url}/{draft_id}"
+        response = requests.get(metadata_url, auth=self._bearer_auth)
+        
+        if response.status_code != 200:
+            raise Exception(f"Failed to retrieve metadata. Status code: {response.status_code}")
+        
+        metadata = response.json()['metadata']
+        
+        # Increment version number
+        current_version = metadata.get('version', '1.0.0')
+        version_parts = current_version.split('.')
+        version_parts[-1] = str(int(version_parts[-1]) + 1)
+        new_version = '.'.join(version_parts)
+        metadata['version'] = new_version
+
+        # Update metadata
+        response = requests.put(metadata_url, json={'metadata': metadata},
+                                headers={'Content-Type': 'application/json'}, 
+                                auth=self._bearer_auth)
+        
+        if response.status_code != 200:
+            raise Exception(f"Failed to update metadata. Status code: {response.status_code}")
+
+        # Step 6: Publish the new version
+        if publish:
+            #return self.publish()
+            publish_url = f"{url}/{draft_id}/actions/publish"
+            response = requests.post(publish_url, auth=self._bearer_auth)
+        
+            if response.status_code != 202:
+                raise Exception(f"Failed to publish new version. Status code: {response.status_code}")
+
+            published_data = response.json()
+            print(f"Successfully updated deposition {deposition_id} with new file version.")
+            print(f"New version DOI: {published_data['doi']}")
+            print(f"Concept DOI: {published_data['conceptdoi']}")
+        
+            return published_data
+        else:
+            unpublished_data = response.json()
+            return unpublished_data
 
     def upload_zip(self, source_dir=None, output_file=None, publish=False):
         """upload a directory to a project as zip
@@ -509,7 +616,7 @@ class Client(object):
             source_dir (str): path to directory to tar
             output_file (str): name of output file (optional)
                 defaults to using the source_dir name as output_file
-            publish (bool): whether implemente publish action or not, argument for `upload_file`
+            publish (bool): whether implement publish action or not, argument for `upload_file`
         """
         # make sure source directory exists
         source_dir = os.path.expanduser(source_dir)
@@ -649,13 +756,36 @@ class Client(object):
         else:
             raise FileNotFoundError(f"{source} does not exist")
 
+
     def publish(self):
-        """ publish a record
-        """
-        url_action = self._get_depositions_by_id(self.deposition_id)['links']['publish']
-        r = requests.post(url_action, auth=self._bearer_auth)
-        r.raise_for_status()
-        return r
+        """ Publish a record """
+        try:
+            deposition_data = self._get_depositions_by_id(self.deposition_id)
+            url_action = deposition_data['links'].get('publish')
+
+            if not url_action:
+                print("Publish link not found. The deposition might not be ready for publishing.")
+                return None
+
+            if  self.is_published :     
+                print("This deposition was published yet. ")
+                print("To publish it again please remove 'doi' entry from metadata.")
+                return None
+
+            # Try to publish
+            r = requests.post(url_action, auth=self._bearer_auth)
+            r.raise_for_status()
+
+            print("Deposition published successfully!")
+            return r.json()
+
+        except requests.exceptions.HTTPError as err:
+            print(f"HTTP error occurred: {err}")
+            print(f"Response: {r.text}")  # For more detailed error information
+        except KeyError:
+            print("KeyError: Failed to retrieve 'publish' link. Check if the deposition is ready for publication.")
+        except Exception as e:
+            print(f"An error occurred: {e}")
 
     def download_file(self, filename=None, dst_path=None):
         """download a file from project
@@ -692,19 +822,17 @@ class Client(object):
                 print(f' ** {bucket_link}/{filename} is not a valid URL ** ')
 
     def _is_doi(self, string=None):
-        """test if string is of the form of a zenodo doi
-        10.5281.zenodo.[0-9]+
-
-        Args:
-            string (strl): string to test. Defaults to None.
-
-        Returns:
-           bool: true is string is doi-like
         """
-        import re
-        pattern = re.compile("10.5281/zenodo.[0-9]+")
-        return pattern.match(string)
-
+        #Zenodo DOI pattern: 10.5281/zenodo.XXXXXXX
+        #Zenodo sandbox DOI pattern: 10.5072/zenodo.XXXXXXX
+        
+        # Check if the string matches the Zenodo DOI pattern
+        """
+        if re.match(self._doi_pattern, string):
+            return True
+        else:
+            return False
+        
     def _get_record_id_from_doi(self, doi=None):
         """return the record id for given doi
 
@@ -731,7 +859,7 @@ class Client(object):
             print(f"{doi} must be of the form: 10.5281/zenodo.[0-9]+")
 
         # get request (do not need to provide access token since public
-        r = requests.get(f"https://zenodo.org/api/records/{record_id}")  # params={'access_token': ACCESS_TOKEN})
+        r = requests.get(f"{self._endpoint}/records/{record_id}")  # params={'access_token': ACCESS_TOKEN})
         return [f['links']['self'] for f in r.json()['files']]
 
     def _get_latest_record(self, record_id=None):
@@ -783,21 +911,77 @@ class Client(object):
         #    print(f'Project title {self.title} is still available.')
 
 
-    def _get_metadata(self, deposition_id=None):
-        if deposition_id is None :
-            deposition_id = self.deposition_id
+    def _set_edit(self,dep_id=None):
+        """Set the edit mode if the deposition is published
+        
+        Args:
+            dep_id (str): The project deposition ID
+        """
+        if dep_id is None :
+                dep_id = self.deposition_id
+        if self.is_published :     
+            url = f"{self._endpoint }/deposit/depositions/{dep_id}"
+            r =  requests.post(f"{url}/actions/edit",auth=self._bearer_auth)
+
+
+    def get_conceptid_from_depo(self,dep_id=None):
+        """
+        Retrieves the concept recid of a deposition on Zenodo.
+
+        """
+        if dep_id is None : dep_id = self.deposition_id
+
+        url = f"{self._endpoint}/deposit/depositions/{dep_id}"
+
+        # Fetch the existing metadata
+        response = requests.get(url, auth=self._bearer_auth)
+
+        if response.status_code == 200:
+            return response.json()["conceptrecid"]
+        else:
+            print(f"Failed to fetch concept recid. Status code: {response.status_code}")
+            return None
+
+
+    def get_depo_ids(self,concept_id,all=True):
+        # get the list of deposition_id associated with the concept.id
+        params = {
+            "q": f"conceptrecid:{concept_id}",
+            "size": 100,  # Adjust this value based on the expected number of records
+            "sort": "version",
+        }
+        if all : params["all_versions"] = True
+
+        deposit_ids = []
+        url = f'{self._endpoint}/records'
+        response = requests.get(url, auth=self._bearer_auth, params=params)
+        if response.status_code == 200:
+            data = response.json()
+            for hit in data.get("hits", {}).get("hits", []):
+                deposit_id = hit.get("id")
+                if deposit_id:
+                    deposit_ids.append(deposit_id)
+        else:
+            print(f"Error: {response.status_code} - {response.text}")
+        return deposit_ids
+
+    def get_last_depo_id(self,concept_id):
+        return self.get_depo_ids(concept_id,all=False)
+
+
+    def _get_metadata(self,dep_id: str=None):
         """
         Retrieves the current metadata of a deposition on Zenodo.
 
         Args:
-            deposition_id (str): The ID of the deposition.
+            dep_id (str): The ID of the deposition.
 
         Returns:
             response (dict): The current metadata from the Zenodo API.
         """
-
-        url = f"{self.bucket}/deposit/depositions/{deposition_id}"
-        headers = {"Authorization": f"Bearer {self.access_token}"}
+        if dep_id is None :
+            dep_id = self.deposition_id
+        url = f"{self._endpoint}/deposit/depositions/{dep_id}"
 
         # Fetch the existing metadata
         response = requests.get(url, auth=self._bearer_auth)
@@ -807,3 +991,47 @@ class Client(object):
         else:
             print(f"Failed to fetch metadata. Status code: {response.status_code}")
             return None
+
+
+    def _set_metadata(self, new_metadata: dict, dep_id: str=None):
+        """
+        Modifies the metadata of a deposition on Zenodo, merging new metadata with the existing one.
+
+        Args:
+            dep_id (str): The ID of the deposition to modify.
+            new_metadata (dict): The new metadata fields to update.
+
+        Returns:
+            response (dict): The response from the Zenodo API.
+        """
+        if dep_id is None :   dep_id = self.deposition_id
+        print(f"Setting metadata for deposition : {dep_id}") 
+
+        # First, retrieve the current metadata
+        current_metadata = self._get_metadata(dep_id)
+       
+        if current_metadata is None:
+                current_metadata = new_metadata
+        else:
+            # Merge the current metadata w  ith the new metadata
+            current_metadata.update(new_metadata)
+        
+        url = f"{self._endpoint}/deposit/depositions/{dep_id}"
+        
+        data = json.dumps({"metadata": current_metadata})
+        print(data)
+        print(url)
+        # Update the metadata without overwriting everything
+        response = requests.put(url, 
+                                auth=self._bearer_auth,
+                                data=data,
+                                headers={'Content-Type': 'application/json'})
+        
+        # Check if the request was successful
+        if response.status_code == 200:
+            print("Metadata updated successfully!")
+            return response.json()
+        else:
+            print(f"Failed to update metadata. Status code: {response.status_code}")
+            return response.json()
+            
