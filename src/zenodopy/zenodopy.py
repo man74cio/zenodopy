@@ -450,37 +450,40 @@ class Client(object):
             title (str): new title of project
             upload_type (str): new upload type
             description (str): new description
-            **kwargs: dictionary to update default metadata
+            creator (str): creator name
+            **kwargs: additional metadata fields
 
         Returns:
             dict: dictionary with new metadata
         """
-        if upload_type is None:
-            upload_type = 'other'
+        print("calling change_metadata from zenodopy")
 
-        if description is None:
-            description = "description goes here"
-
-        if creator is None:
-            creator = "creator goes here"
-
-        data = {
-            "metadata": {
-                "title": f"{title}",
-                "upload_type": f"{upload_type}",
-                "description": f"{description}",
-                "creators": [{"name": f"{creator}"}]
-            }
+        metadata = {
+            "title": title or "Title goes here",
+            "upload_type": upload_type or "other",
+            "description": description or "Description goes here",
+            "creators": [{"name": creator or "Creator goes here"}]
         }
-        # update metadata with a new metadata dictionary
-        data['metadata'].update(kwargs)
+
+        # Update metadata with additional fields from kwargs
+        for key, value in kwargs.items():
+            if isinstance(value, dict):
+                # If the value is a dictionary, update or add it to metadata
+                metadata[key] = metadata.get(key, {})
+                metadata[key].update(value)
+            else:
+                # If it's not a dictionary, simply add or update the field
+                metadata[key] = value
+
+        data = {"metadata": metadata}
+        print(data['metadata'])
 
         url = f"{self._endpoint}/deposit/depositions/{dep_id}"
         print(url)
         r = requests.put(url,
-                         auth=self._bearer_auth,
-                         data=json.dumps(data),
-                         headers={'Content-Type': 'application/json'})
+                        auth=self._bearer_auth,
+                        data=json.dumps(data),
+                        headers={'Content-Type': 'application/json'})
 
         if r.ok:
             return r.json()
@@ -895,21 +898,25 @@ class Client(object):
         Args:
             dep_id (str): The project deposition ID
         """
-        print('')
         # if input("are you sure you want to delete this project? (y/n)") == "y":
         # delete requests, we are deleting the resource at the specified URL
         r = requests.delete(f'{self._endpoint}/deposit/depositions/{dep_id}',
                             auth=self._bearer_auth)
         # response status
-        print(r.status_code)
+        if r.status_code == 204:
+            print(f"Deposition {dep_id} is deleted")
+        else:
+            print(f'Project title {self.title} is still available.')   
+            raise Exception(f"Failed to delete deposition. Status code: {response.status_code}")  
 
         # reset class variables to None
-        self.title = None
-        self.bucket = None
-        self.deposition_id = None
-        # else:
-        #    print(f'Project title {self.title} is still available.')
+        if dep_id == self.deposition_id:
+            self.title = None
+            self.bucket = None
+            self.deposition_id = None
+            self.concept_id = None
 
+       
 
     def _set_edit(self,dep_id=None):
         """Set the edit mode if the deposition is published
@@ -1035,3 +1042,20 @@ class Client(object):
             print(f"Failed to update metadata. Status code: {response.status_code}")
             return response.json()
             
+
+    def find_community_identifier(self,community_name):
+        """Find a community id from community name"""
+        params = {
+            "q": community_name,
+            "size": 100  # Adjust as needed
+        }
+        
+        response = requests.get(self._endpoint+'/communities', params=params)
+        
+        if response.status_code == 200:
+            data = response.json()
+            for community in data['hits']['hits']:
+                if community['metadata']['title'].lower() == community_name.lower():
+                    return community['id']
+        
+        return None
