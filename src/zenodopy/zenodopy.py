@@ -456,7 +456,7 @@ class Client(object):
         Returns:
             dict: dictionary with new metadata
         """
-        print("calling change_metadata from zenodopy")
+        #print("calling change_metadata from zenodopy")
 
         metadata = {
             "title": title or "Title goes here",
@@ -909,8 +909,8 @@ class Client(object):
         if r.status_code == 204:
             print(f"Deposition {dep_id} is deleted")
         else:
-            print(f'Project title {self.title} is still available.')   
-            raise Exception(f"Failed to delete deposition. Status code: {response.status_code}")  
+            print(f'Project "{self.title}" is still available.')   
+            raise Exception(f"Failed to delete deposition. Status code: {r.status_code}")  
 
         # reset class variables to None
         if dep_id == self.deposition_id:
