@@ -94,6 +94,7 @@ class Client(object):
         self._token = self._read_from_config if token is None else token
         self._bearer_auth = BearerAuth(self._token)
         self.concept_id = None
+        self.associated = False
         # 'metadata/prereservation_doi/doi'
 
     def __repr__(self):
@@ -302,7 +303,7 @@ class Client(object):
 
         if isinstance(tmp, list):
             print('--- Project Name '+ '-'*28 + ' ID ------ CID - Status --- Latest ----- Published ID ' +'-'*10)
-            print('-'*109)
+
             for file in tmp:
                 status = {}  # just to rename the file outputs and deal with exceptions
                 if file['submitted']:
@@ -326,7 +327,6 @@ class Client(object):
         else:
             print(' ** need to setup ~/.zenodo_token file ** ')
         
-
     def _is_published(self,deposition_id=None):
         """
         Property to retrieve if the deposition is published.
@@ -412,23 +412,37 @@ class Client(object):
             self.deposition_id = r.json()['id']
             self.bucket = r.json()['links']['bucket']
             self.title = title
+            self.associated =  True
         else:
             print("** Project not created, something went wrong. Check that your ACCESS_TOKEN is in ~/.zenodo_token ")
+
+
+    def _unset_project(self):
+        self.title = None
+        self.bucket = None
+        self.deposition_id = None
+        self.concept_id = None
+        self.associated =  False
+
 
     def set_project(self,dep_id: str):
         '''set the project by id'''
 
         # get all projects 
         projects = self._get_depositions_by_id(dep_id)
-
+        
         if projects is not None:
             self.title = projects['title']
             self.bucket = self._get_bucket_by_id(dep_id)
             self.deposition_id = dep_id
             self.concept_id = projects["conceptrecid"]
+            self.associated =  True
+
         else:
             print(f' ** Deposition ID: {dep_id} does not exist in your projects  ** ')
-       
+            self._unset_project()
+
+
     def change_metadata(self, dep_id=None,
                         title=None,
                         upload_type=None,
@@ -497,6 +511,9 @@ class Client(object):
             file_path (str): name of the file to upload
             publish (bool): whether implement publish action or not
         """
+        if not self.associated:
+            print("Zenodo Client not associated ") 
+        
         if file_path is None:
             print("You need to supply a path")
 
@@ -521,11 +538,15 @@ class Client(object):
                     print("Oh no! something went wrong")
                     print(f"Error: {r.status_code} - {r.text}")
             if publish:
-                return self.publish()
+                self.publish()
     
 
 
     def update_zenodo_deposition(self,file_path, publish=False):
+        if not self.associated:
+            print("Zenodo Client not associated ") 
+            return 
+
         deposition_id = self.deposition_id
         url = f"{self._endpoint}/deposit/depositions/"
 
@@ -535,7 +556,6 @@ class Client(object):
 
         if response.status_code != 201:
             raise Exception(f"Failed to create new version. Status code: {response.status_code}")
-
 
         draft_data = response.json()
         draft_id = draft_data['links']['latest_draft'].split('/')[-1]
@@ -624,6 +644,10 @@ class Client(object):
                 defaults to using the source_dir name as output_file
             publish (bool): whether implement publish action or not, argument for `upload_file`
         """
+        if not self.associated:
+            print("Zenodo Client not associated ") 
+            return None 
+
         # make sure source directory exists
         source_dir = os.path.expanduser(source_dir)
         source_obj = Path(source_dir)
@@ -682,6 +706,11 @@ class Client(object):
                 defaults to using the source_dir name as output_file
             publish (bool): whether implemente publish action or not, argument for `upload_file`
         """
+
+        if not self.associated:
+            print("Zenodo Client not associated ") 
+            return None 
+
         # output_file = './tmp/tarTest.tar.gz'
         # source_dir = '/Users/gloege/test'
 
@@ -736,6 +765,9 @@ class Client(object):
                 defaults to using the source_dir name as output_file
             publish (bool): whether implemente publish action or not, argument for `upload_file`
         """
+        if not self.associated:
+            print("Zenodo Client not associated ") 
+        
         # create a draft deposition
         url_action = self._get_depositions_by_id(self.deposition_id)['links']['newversion']
         r = requests.post(url_action, auth=self._bearer_auth)
@@ -765,6 +797,9 @@ class Client(object):
 
     def publish(self):
         """ Publish a record """
+        if not self.associated:
+            print("Zenodo Client not associated ") 
+            return None 
         try:
             deposition_data = self._get_depositions_by_id(self.deposition_id)
             url_action = deposition_data['links'].get('publish')
@@ -800,6 +835,9 @@ class Client(object):
             filename (str): name of the file to download
             dst_path (str): destination path to download the data (default is current directory)
         """
+        if not self.associated:
+            print("Zenodo Client not associated ") 
+        
         if filename is None:
             print(" ** filename not supplied ** ")
 
@@ -877,6 +915,8 @@ class Client(object):
         Returns:
             str: the latest record id or 'None' if not found
         """
+        if not self.associated:
+            return 'None' 
         try:
             record = self._get_depositions_by_id(record_id)['links']['latest'].split('/')[-1]
         except:
@@ -889,6 +929,10 @@ class Client(object):
         Args:
             filename (str): the name of file to delete
         """
+        if not self.associated:
+            print("Zenodo Client not associated ") 
+            return
+
         bucket_link = self.bucket
 
         # with open(file_path, "rb") as fp:
@@ -901,6 +945,8 @@ class Client(object):
         Args:
             dep_id (str): The project deposition ID
         """
+        if dep_id is None :   dep_id = self.deposition_id
+
         # if input("are you sure you want to delete this project? (y/n)") == "y":
         # delete requests, we are deleting the resource at the specified URL
         r = requests.delete(f'{self._endpoint}/deposit/depositions/{dep_id}',
@@ -919,7 +965,31 @@ class Client(object):
             self.deposition_id = None
             self.concept_id = None
 
-       
+
+    def _retire_published_upload(self, dep_id=None):
+        """Withdraw a published deposition
+        
+        Args:
+            dep_id (str): The project deposition ID
+        """
+        if dep_id is None:
+            dep_id = self.deposition_id
+
+        # Construct the correct API URL for withdrawing the deposition
+        withdraw_url = f"{self._endpoint}/deposit/depositions/{dep_id}/actions/withdraw"
+
+        # Send a POST request to withdraw the published deposition
+        response = requests.post(withdraw_url, auth=self._bearer_auth)
+
+        # Check the response status
+        if response.status_code == 202:
+            print(f"Published deposition {dep_id} successfully withdrawn.")
+        else:
+            print(f"Error withdrawing published deposition {dep_id}.")
+            print(f"Status code: {response.status_code}")
+            print("Response content:")
+            print(response.text)
+  
 
     def _set_edit(self,dep_id=None):
         """Set the edit mode if the deposition is published
