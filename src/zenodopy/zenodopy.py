@@ -476,10 +476,10 @@ class Client(object):
                 metadata[key] = value
 
         data = {"metadata": metadata}
-        print(data['metadata'])
+        #print(data['metadata'])
 
         url = f"{self._endpoint}/deposit/depositions/{dep_id}"
-        print(url)
+        #print(url)
         r = requests.put(url,
                         auth=self._bearer_auth,
                         data=json.dumps(data),
@@ -515,8 +515,11 @@ class Client(object):
                 r = requests.put(f"{bucket_link}/{filename}",
                                  auth=self._bearer_auth,
                                  data=fp)
-                print(f"{file_path} successfully uploaded!") if r.ok else print("Oh no! something went wrong")
-
+                if r.ok :
+                    print(f"{file_path} successfully uploaded!")  
+                else :
+                    print("Oh no! something went wrong")
+                    print(f"Error: {r.status_code} - {r.text}")
             if publish:
                 return self.publish()
     
