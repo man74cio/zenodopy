@@ -175,6 +175,7 @@ class Client(object):
         else:
             print(' ** No token was found, check your ~/.zenodo_token file ** ')
 
+
     def _get_depositions(self):
         """gets the current project deposition
 
@@ -302,19 +303,18 @@ class Client(object):
         tmp = self._get_depositions()
 
         if isinstance(tmp, list):
-            print('--- Project Name '+ '-'*28 + ' ID ------ CID - Status --- Latest ----- Published ID ' +'-'*10)
+            print('--- Project Name '+ '-'*28 + ' ID ------ CID -- Status -- Latest ----- Published ID ' +'-'*10)
 
             for file in tmp:
-                status = {}  # just to rename the file outputs and deal with exceptions
-                if file['submitted']:
-                    status['submitted'] = 'Yes'
-                else:
-                    status['submitted'] = 'No '
+                
+                state = file.get('state', '')
+                published = 'Yes' if file.get('submitted', '') else 'No'
+                
 
                 concept_id = self.get_conceptid_from_depo(file['id'])
-                status["latest"] = self._get_latest_record(file['id'])
+                status = self._get_latest_record(file['id'])
 
-                out_string = f"{file['title']:35s}  {file['id']:9d}    {concept_id:9s} {status['submitted']:3s}      {status['latest']:6s} "
+                out_string = f"{file['title']:35s}  {file['id']:9d}    {concept_id:9s}   {published:3s}      {status:6s} "
 
                 # associated deposition
                 start_string = ' * ' if str(self.deposition_id) == str(file['id']) else '   '
@@ -327,29 +327,53 @@ class Client(object):
         else:
             print(' ** need to setup ~/.zenodo_token file ** ')
         
-    def _is_published(self,deposition_id=None):
+
+    def _is_published(self, dep_id=None):
         """
-        Property to retrieve if the deposition is published.
+        Check if a deposition is published.
+
+        Args:
+            dep_id (str, optional): The deposition ID to check. 
+                                    If None, uses self.deposition_id.
 
         Returns:
-            published True (False): deposition is published (no)
+            bool: True if the deposition is published, False otherwise.
+            None: If there's an error or the deposition doesn't exist.
         """
-        if deposition_id is None :   deposition_id = self.deposition_id
+        if dep_id is None:
+            dep_id = self.deposition_id
 
-        url = f"{self._endpoint}/deposit/depositions/{deposition_id}"
-        
-        response = requests.get(url, auth=self._bearer_auth)
-        
-        if response.status_code == 200:
-            deposition_data = response.json()
-            if deposition_data['submitted']:
-                return True
-            else:
-                return False
-        else:
-            print(f"Failed to retrieve deposition status. Status code: {response.status_code}")
+        if dep_id is None:
+            print("No deposition ID provided or set in the class.")
             return None
-    
+
+        # Construct the API URL for the deposition
+        url = f"{self._endpoint}/deposit/depositions/{dep_id}"
+
+        try:
+            # Send a GET request to fetch the deposition details
+            response = requests.get(url, auth=self._bearer_auth)
+
+            # Check if the request was successful
+            if response.status_code == 200:
+                deposition_data = response.json()
+                
+                # Check the state of the deposition
+                state = deposition_data.get('submitted', '')
+                
+                return state
+
+            elif response.status_code == 404:
+                print(f"Deposition {dep_id} not found.")
+                return None
+            else:
+                print(f"Error checking deposition {dep_id}. Status code: {response.status_code}")
+                print("Response content:", response.text)
+                return None
+
+        except requests.RequestException as e:
+            print(f"Network error occurred while checking deposition {dep_id}: {e}")
+            return None
     @property
     def is_published(self):
         return self._is_published()
@@ -967,7 +991,7 @@ class Client(object):
 
 
     def _retire_published_upload(self, dep_id=None):
-        """Withdraw a published deposition
+        """Move a published deposition back to draft for withdrawal
         
         Args:
             dep_id (str): The project deposition ID
@@ -975,21 +999,24 @@ class Client(object):
         if dep_id is None:
             dep_id = self.deposition_id
 
-        # Construct the correct API URL for withdrawing the deposition
-        withdraw_url = f"{self._endpoint}/deposit/depositions/{dep_id}/actions/withdraw"
+        # Construct the correct API URL for the 'edit' action
+        edit_url = f"{self._endpoint}/deposit/depositions/{dep_id}/actions/edit"
+        print(f"Attempting to revert deposition to draft status at URL: {edit_url}")
 
-        # Send a POST request to withdraw the published deposition
-        response = requests.post(withdraw_url, auth=self._bearer_auth)
+        # Send a POST request to revert the published deposition to draft
+        response = requests.post(edit_url, auth=self._bearer_auth)
 
         # Check the response status
         if response.status_code == 202:
-            print(f"Published deposition {dep_id} successfully withdrawn.")
+            print(f"Published deposition {dep_id} successfully reverted to draft status.")
+        elif response.status_code == 404:
+            print(f"Deposition {dep_id} not found. Verify the ID and endpoint.")
+            print(f"URL: {edit_url}")
         else:
-            print(f"Error withdrawing published deposition {dep_id}.")
+            print(f"Error reverting published deposition {dep_id}.")
             print(f"Status code: {response.status_code}")
             print("Response content:")
             print(response.text)
-  
 
     def _set_edit(self,dep_id=None):
         """Set the edit mode if the deposition is published
@@ -1073,7 +1100,7 @@ class Client(object):
             return None
 
 
-    def _set_metadata(self, new_metadata: dict, dep_id: str=None):
+    def _set_metadata(self, new_metadata: dict, dep_id: str=None, **kwargs):
         """
         Modifies the metadata of a deposition on Zenodo, merging new metadata with the existing one.
 
@@ -1096,11 +1123,23 @@ class Client(object):
             # Merge the current metadata w  ith the new metadata
             current_metadata.update(new_metadata)
         
+        # Update metadata with additional fields from kwargs
+        for key, value in kwargs.items():
+            #print (key,value,'----')
+            if isinstance(value, dict):
+                # If the value is a dictionary, update or add it to metadata
+                current_metadata[key] = current_metadata.get(key, {})
+                current_metadata[key].update(value)
+            else:
+                # If it's not a dictionary, simply add or update the field
+                current_metadata[key] = value
+
         url = f"{self._endpoint}/deposit/depositions/{dep_id}"
         
         data = json.dumps({"metadata": current_metadata})
-        print(data)
-        print(url)
+        #[print(ii,jj) for ii,jj in current_metadata.items() ]
+
+
         # Update the metadata without overwriting everything
         response = requests.put(url, 
                                 auth=self._bearer_auth,
@@ -1110,10 +1149,10 @@ class Client(object):
         # Check if the request was successful
         if response.status_code == 200:
             print("Metadata updated successfully!")
-            return response.json()
+            #return response.json()
         else:
             print(f"Failed to update metadata. Status code: {response.status_code}")
-            return response.json()
+            #return response.json()
             
 
     def find_community_identifier(self,community_name):
