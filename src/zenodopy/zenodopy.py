@@ -990,34 +990,47 @@ class Client(object):
             self.concept_id = None
 
 
-    def _retire_published_upload(self, dep_id=None):
-        """Move a published deposition back to draft for withdrawal
-        
-        Args:
-            dep_id (str): The project deposition ID
+    def _retire_published_upload(self, dep_id=None, reason: str=None):
+        """Retire a published deposition.   
+            Args:
+                dep_id (str, optional): The deposition ID to retire. If None, uses self.deposition_id.
+                reason (str, optional): The reason for retiring the deposition. 
+            Returns:
+                dict: The JSON response from the API if successful.
+                None: If there's an error or the deposition can't be retired.
         """
+            
         if dep_id is None:
             dep_id = self.deposition_id
+        
+        if dep_id is None:
+            print("No deposition ID provided or set in the class.")
+            return None
 
-        # Construct the correct API URL for the 'edit' action
-        edit_url = f"{self._endpoint}/deposit/depositions/{dep_id}/actions/edit"
-        print(f"Attempting to revert deposition to draft status at URL: {edit_url}")
+        # Check if the deposition is published
+        if not self._is_published(dep_id):
+            print(f"Deposition {dep_id} is not published and cannot be retired.")
+            return None
 
-        # Send a POST request to revert the published deposition to draft
-        response = requests.post(edit_url, auth=self._bearer_auth)
-
-        # Check the response status
-        if response.status_code == 202:
-            print(f"Published deposition {dep_id} successfully reverted to draft status.")
-        elif response.status_code == 404:
-            print(f"Deposition {dep_id} not found. Verify the ID and endpoint.")
-            print(f"URL: {edit_url}")
-        else:
-            print(f"Error reverting published deposition {dep_id}.")
-            print(f"Status code: {response.status_code}")
-            print("Response content:")
-            print(response.text)
-
+        url = f"{self._endpoint}/deposit/depositions/{dep_id}/actions/retire"
+        
+        data = {}
+        if reason : 
+            data['reason'] = reason
+        try:
+            response = requests.post(url, json=data, auth=self._bearer_auth)
+            
+            if response.status_code == 201:
+                print(f"Deposition {dep_id} has been successfully retired.")
+                return response.json()
+            else:
+                print(f"Failed to retire deposition {dep_id}. Status code: {response.status_code}")
+                print("Response content:", response.text)
+                return None
+        except requests.RequestException as e:
+            print(f"Network error occurred while retiring deposition {dep_id}: {e}")
+            return None
+        
     def _set_edit(self,dep_id=None):
         """Set the edit mode if the deposition is published
         
@@ -1029,7 +1042,9 @@ class Client(object):
         if self.is_published :     
             url = f"{self._endpoint }/deposit/depositions/{dep_id}"
             r =  requests.post(f"{url}/actions/edit",auth=self._bearer_auth)
-
+            if not r.ok:
+                print(f"Failed to set deposition {dep_id} to edit mode. Status code: {r.status_code}")
+                print("Response content:", r.text)
 
     def get_conceptid_from_depo(self,dep_id=None):
         """
@@ -1067,7 +1082,7 @@ class Client(object):
             for hit in data.get("hits", {}).get("hits", []):
                 deposit_id = hit.get("id")
                 if deposit_id:
-                    deposit_ids.append(deposit_id)
+                    deposit_ids.sappend(deposit_id)
         else:
             print(f"Error: {response.status_code} - {response.text}")
         return deposit_ids
