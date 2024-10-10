@@ -115,16 +115,16 @@ class Client(object):
             list: contains acceptable upload_types
         """
         return [
-            "Publication",
-            "Poster",
-            "Presentation",
-            "Dataset",
-            "Image",
-            "Video/Audio",
-            "Software",
-            "Lesson",
-            "Physical object",
-            "Other"
+            "publication",
+            "poster",
+            "presentation",
+            "dataset",
+            "image",
+            "video",
+            "software",
+            "lesson",
+            "physicalobject",
+            "other"
         ]
 
     @staticmethod
@@ -412,17 +412,19 @@ class Client(object):
             description (str, optional): new description
         """
 
-        if upload_type is None:
-            upload_types = self._get_upload_types()
-            warnings.warn(f"upload_type not set, so defaulted to 'other', possible choices include {upload_types}",
-                          UserWarning)
-            upload_type = 'other'
-
         # get request, returns our response
         r = requests.post(f"{self._endpoint}/deposit/depositions",
                           auth=self._bearer_auth,
                           data=json.dumps({}),
                           headers={'Content-Type': 'application/json'})
+
+
+        # if upload_type is None:
+        #     upload_types = self._get_upload_types()
+        #     warnings.warn(f"upload_type not set, so defaulted to 'other', possible choices include {upload_types}",
+        #                   UserWarning)
+        #     upload_type = 'other'
+
 
         if r.ok:
             deposition_id = r.json()['id']
@@ -526,6 +528,7 @@ class Client(object):
         if r.ok:
             return r.json()
         else:
+            print (r.text)
             return r.raise_for_status()
 
     def upload_file(self, file_path=None, custom_filename=None):
@@ -1181,6 +1184,11 @@ class Client(object):
             response (dict): The response from the Zenodo API.
         """
         if dep_id is None :   dep_id = self.deposition_id
+
+        if dep_id is None :
+            print(f"Deposition is not set!")
+            return
+
         print(f"Setting metadata for deposition : {dep_id}")
 
         # First, retrieve the current metadata
@@ -1221,7 +1229,7 @@ class Client(object):
             #return response.json()
         else:
             print(f"Failed to update metadata. Status code: {response.status_code}")
-            #return response.json()
+            print( response.json())
 
 
     def find_community_identifier(self,community_name):
