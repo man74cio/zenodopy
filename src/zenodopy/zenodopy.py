@@ -387,16 +387,20 @@ class Client(object):
         """
         dep_id = self.deposition_id
         dep = self._get_depositions_by_id(dep_id)
+        list_file = []
         if dep is not None:
             print('Files')
             print('------------------------')
             for file in dep['files']:
                 print(file['filename'])
+                list_file.append(file['filename'])
+
         else:
             print(" ** the object is not pointing to a project. Use either .set_project() or .create_project() before listing files ** ")
             # except UserWarning:
             # warnings.warn("The object is not pointing to a project. Either create a project or explicity set the project'", UserWarning)
-
+        return list_file
+            
     def create_project(self, title=None, upload_type=None, description=None):
         """Creates a new project
 
@@ -531,26 +535,31 @@ class Client(object):
             print (r.text)
             return r.raise_for_status()
 
-    def upload_file(self, file_path=None, custom_filename=None):
+    def upload_file(self, file_path=None, custom_filename=None,publish=False):
         """upload a file to a project
 
         Args:
             file_path (str): name of the file to upload
+            custum_filename (str) : name of the file on the site
             publish (bool): whether implement publish action or not
 
         """
         if not self.associated:
             print("Zenodo Client not associated ")
-
+            return False
+        
         if file_path is None:
             print("You need to supply a path")
-
+            return False
+        
         if not Path(os.path.expanduser(file_path)).exists():
             print(f"{file_path} does not exist. Please check you entered the correct path")
-
+            return False
+        
         if self.bucket is None:
             print("You need to create a project with zeno.create_project() "
                   "or set a project zeno.set_project() before uploading a file")
+            return False
         else:
             bucket_link = self.bucket
 
@@ -567,6 +576,7 @@ class Client(object):
                     print(f"Error: {r.status_code} - {r.text}")
             if publish:
                 self.publish()
+            return True
 
     def upload_file(self, file_path=None, custom_filename=None, publish=False):
         """Upload a file to a project
@@ -984,7 +994,7 @@ class Client(object):
             print(f"{doi} must be of the form: 10.5281/zenodo.[0-9]+")
 
         # get request (do not need to provide access token since public
-        r = requests.get(f"{self._endpoint}/records/{record_id}")  # params={'access_token': ACCESS_TOKEN})
+        r = requests.get(f"{self._endpoint}/records/{record_id}") 
         return [f['links']['self'] for f in r.json()['files']]
 
     def _get_latest_record(self, record_id=None):
@@ -1121,6 +1131,8 @@ class Client(object):
             print(f"Failed to fetch concept recid. Status code: {response.status_code}")
             return None
 
+    def get_doi(self):
+        return self._get_metadata().get('doi',None)
 
     def get_depo_ids(self,concept_id,all=True):
         # get the list of deposition_id associated with the concept.id
@@ -1248,3 +1260,52 @@ class Client(object):
                     return community['id']
 
         return None
+
+
+    def title_exists(self, title):
+        """
+        Check if depositions with the given title exist in Zenodo,
+        and return their IDs if found.
+        
+        Args:
+        title (str): The title to search for.
+        
+        Returns:
+        dict: A dictionary containing 'exists' (bool) and 'ids' (list of str)
+        """
+        result = {
+            'exists': False,
+            'ids': []
+        }
+
+        search_url = f"{self._endpoint}/deposit/depositions"
+        params = {
+            'size': 9999  # Adjust this value based on your needs
+        }
+       
+        try:
+            response = requests.get(search_url, params=params, auth=self._bearer_auth)
+            response.raise_for_status()
+            
+            depositions = response.json()
+            for deposition in depositions:
+                if deposition.get('metadata', {}).get('title', '').lower() == title.lower():
+                    result['exists'] = True
+                    deposition_id = deposition.get('id')
+                    result['ids'].append(deposition_id)
+                    status = "published" if deposition.get('submitted', False) else "draft"
+                    print(f"Found {status} deposition with title: {title}, ID: {deposition_id}")
+            
+            if not result['exists']:
+                print(f"No deposition found with title: {title}")
+            elif len(result['ids']) > 1:
+                print(f"Warning: Multiple depositions found with title: {title}")
+
+        except requests.exceptions.RequestException as e:
+            print(f"Error searching depositions: {e}")
+            print(f"Response status code: {e.response.status_code if e.response else 'N/A'}")
+            print(f"Response content: {e.response.text if e.response else 'N/A'}")
+
+        return result
+    
+    
