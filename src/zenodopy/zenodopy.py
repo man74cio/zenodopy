@@ -666,15 +666,24 @@ class Client(object):
             if response.status_code != 204:
                 raise Exception(f"Failed to delete old file. Status code: {response.status_code}")
 
-        # Upload the new file
-        with open(file_path, 'rb') as file:
-            filename = custom_filename if custom_filename else os.path.basename(file_path)
-            data = {'name': filename}
-            files = {'file': (filename, file)}
-            response = requests.post(files_url, auth=self._bearer_auth, data=data, files=files)
+     
+        bucket_link = self.bucket
 
-            if response.status_code != 201:
-                raise Exception(f"Failed to upload new file. Status code: {response.status_code}")
+        with open(file_path, "rb") as fp:
+            # Use custom filename if provided, otherwise use the original filename
+            filename = custom_filename if custom_filename else os.path.basename(file_path)
+            r = requests.put(f"{bucket_link}/{filename}",
+                             auth=self._bearer_auth,
+                             data=fp)
+            if r.ok:
+                print(f"File successfully uploaded as {filename}!")
+            else:
+                print("Oh no! Something went wrong")
+                print(f"Error: {r.status_code} - {r.text}")
+
+        if publish:
+            self.publish()
+
 
         # Update metadata (increment version number if published)
         if is_published:
@@ -716,7 +725,7 @@ class Client(object):
 
             return published_data
         else:
-            unpublished_data = response.json()
+            unpublished_data = response.json()QUIIIII
             return unpublished_data
 
 
