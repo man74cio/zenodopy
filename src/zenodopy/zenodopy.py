@@ -213,6 +213,8 @@ class Client(object):
         else:
             return r.raise_for_status()
 
+
+
     def _get_depositions_files(self):
         """gets the file deposition
 
@@ -457,6 +459,7 @@ class Client(object):
 
     def set_project(self,dep_id: str):
         '''set the project by id'''
+        self._unset_project()
 
         # get all projects
         projects = self._get_depositions_by_id(dep_id)
@@ -470,7 +473,7 @@ class Client(object):
 
         else:
             print(f' ** Deposition ID: {dep_id} does not exist in your projects  ** ')
-            self._unset_project()
+            
 
 
     def change_metadata(self, dep_id=None,
@@ -535,49 +538,7 @@ class Client(object):
             print (r.text)
             return r.raise_for_status()
 
-    def upload_file(self, file_path=None, custom_filename=None,publish=False):
-        """upload a file to a project
-
-        Args:
-            file_path (str): name of the file to upload
-            custum_filename (str) : name of the file on the site
-            publish (bool): whether implement publish action or not
-
-        """
-        if not self.associated:
-            print("Zenodo Client not associated ")
-            return False
-        
-        if file_path is None:
-            print("You need to supply a path")
-            return False
-        
-        if not Path(os.path.expanduser(file_path)).exists():
-            print(f"{file_path} does not exist. Please check you entered the correct path")
-            return False
-        
-        if self.bucket is None:
-            print("You need to create a project with zeno.create_project() "
-                  "or set a project zeno.set_project() before uploading a file")
-            return False
-        else:
-            bucket_link = self.bucket
-
-            with open(file_path, "rb") as fp:
-                # text after last '/' is the filename
-                filename = file_path.split('/')[-1]
-                r = requests.put(f"{bucket_link}/{filename}",
-                                 auth=self._bearer_auth,
-                                 data=fp)
-                if r.ok :
-                    print(f"{file_path} successfully uploaded!")
-                else :
-                    print("Oh no! something went wrong")
-                    print(f"Error: {r.status_code} - {r.text}")
-            if publish:
-                self.publish()
-            return True
-
+   
     def upload_file(self, file_path=None, custom_filename=None, publish=False):
         """Upload a file to a project
 
@@ -725,7 +686,7 @@ class Client(object):
 
             return published_data
         else:
-            unpublished_data = response.json()QUIIIII
+            unpublished_data = response.json()
             return unpublished_data
 
 
