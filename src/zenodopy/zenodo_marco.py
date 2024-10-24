@@ -7,7 +7,7 @@ import warnings
 import tarfile
 import zipfile
 from tabulate import tabulate
-
+import time
 
 def validate_url(url):
     """validates if URL is formatted correctly
@@ -186,7 +186,6 @@ class Client(object):
         """
         url = f"{self._endpoint}/deposit/depositions"
         params = {
-            "access_token": self._token,
             "size": 1000,  # Adjust this value based on your needs
             "sort": "mostrecent",
             "all_versions": True
@@ -196,7 +195,7 @@ class Client(object):
         concept_ids_processed = set()
 
         while True:
-            response = requests.get(url, params=params)
+            response = requests.get(url, auth=self._bearer_auth,params=params)
             response.raise_for_status()
             depositions = response.json()
 
@@ -218,15 +217,16 @@ class Client(object):
 
         return all_depositions
 
-    
+
 
     def set_deposition(self, deposition_id=None):
         """
         Sets the client to a specific deposition's latest version using a given deposition_id.
 
         Args:
-            deposition_id (int): The ID of the deposition to set.
-
+            deposition_id (int): The ID of the deposition to set. It can be 
+            referred also to an old version ... the id will be set to the last one.
+            
         Raises:
             ValueError: If no valid deposition is found for the given ID.
         """
@@ -244,13 +244,12 @@ class Client(object):
         # Retrieve the latest version of the deposition using concept ID
         url = f"{self._endpoint}/deposit/depositions"
         params = {
-            "access_token": self._token,
             "q": f"conceptrecid:{concept_id}",
             "sort": "mostrecent",
             "size": 1
         }
         
-        response = requests.get(url, params=params)
+        response = requests.get(url, auth=self._bearer_auth, params=params)
         response.raise_for_status()
         depositions = response.json()
 
@@ -260,55 +259,14 @@ class Client(object):
         latest_deposition = depositions[0]
 
         # Set class variables based on the latest version of the deposition
-        self.title = latest_deposition['metadata'].get('title',None)
+        self.title = latest_deposition['metadata'].get('title', None)
         self.bucket = latest_deposition['links'].get('bucket', 'N/A')
         
-        self.deposition_id = latest_deposition['id']
-        """
-        Sets the client to a specific deposition's latest version using a given deposition_id.
-
-        Args:
-            deposition_id (int): The ID of the deposition to set.
-
-        Raises:
-            ValueError: If no valid deposition is found for the given ID.
-        """
-        if not deposition_id:
-            raise ValueError("You must provide a deposition_id.")
-
-        # Retrieve the specific deposition by its ID
-        deposition = self.get_deposition_by_id(deposition_id)
-
-        # Get the concept ID from the retrieved deposition
-        concept_id = deposition.get('conceptrecid')
-        if not concept_id:
-            raise ValueError(f"No concept ID found for deposition ID {deposition_id}.")
-
-        # Retrieve the latest version of the deposition using concept ID
-        url = f"{self._endpoint}/deposit/depositions"
-        params = {
-            "access_token": self._token,
-            "q": f"conceptrecid:{concept_id}",
-            "sort": "mostrecent",
-            "size": 1
-        }
-        
-        response = requests.get(url, params=params)
-        response.raise_for_status()
-        depositions = response.json()
-
-        if not depositions:
-            raise ValueError(f"No depositions found for concept ID {concept_id}.")
-        
-        latest_deposition = depositions[0]
-
-        # Set class variables based on the latest version of the deposition
-        self.title = latest_deposition['metadata'].get('title',None)
-        self.bucket = latest_deposition['links'].get('bucket', 'N/A')
         self.deposition_id = latest_deposition['id']
         self.concept_id = latest_deposition['conceptrecid']
         self.associated = True
 
+   
     def unset_deposition(self):
         """
         Unsets the current deposition settings, resetting related attributes.
@@ -319,7 +277,7 @@ class Client(object):
         self.concept_id = None
         self.associated = False
 
-    def get_deposition_by_id(self, deposition_id):
+    def get_deposition_by_id(self, deposition_id=None):
         """
         Retrieves a specific deposition by its ID.
 
@@ -329,13 +287,18 @@ class Client(object):
         Returns:
             dict: A dictionary containing the full metadata of the deposition.
         """
+        if deposition_id is None and self.associated :
+            deposition_id = self.deposition_id
         url = f"{self._endpoint}/deposit/depositions/{deposition_id}"
-        params = {"access_token": self._token}
-
-        response = requests.get(url, params=params)
+ 
+        response = requests.get(url,auth=self._bearer_auth)
         response.raise_for_status()
         return response.json()
     
+    @property
+    def deposition(self):
+        return self.get_deposition_by_id()
+
 
     def pretty_print_depositions(self, depositions=None):
         """
@@ -373,9 +336,8 @@ class Client(object):
         """
         url = f"{self._endpoint}/deposit/depositions"
         headers = {"Content-Type": "application/json"}
-        params = {"access_token": self._token}
 
-        response = requests.post(url, params=params, json={}, headers=headers)
+        response = requests.post(url, auth=self._bearer_auth, json={}, headers=headers)
         response.raise_for_status()
 
         return response.json().get("id",None)
@@ -391,12 +353,12 @@ class Client(object):
         if deposition_id is None : deposition_id = self.deposition_id
 
         url = f"{self._endpoint}/deposit/depositions/{deposition_id}"
-        params = {"access_token": self._token}
 
-        response = requests.delete(url, params=params)
+        response = requests.delete(url, auth=self._bearer_auth)
         response.raise_for_status()
+        if(deposition_id==self.deposition_id) : self.unset_deposition()
 
-    def create_metadata(self, metadata):
+    def create_metadata(self, metadata,  **kwargs):
         """
         Creates or updates metadata for a deposition.
 
@@ -407,12 +369,23 @@ class Client(object):
         Returns:
             dict: The updated deposition data.
         """
+
+        # Update metadata with additional fields from kwargs
+        for key, value in kwargs.items():
+            if isinstance(value, dict):
+                # If the value is a dictionary, update or add it to metadata
+                metadata[key] = metadata.get(key, {})
+                metadata[key].update(value)
+            else:
+                # If it's not a dictionary, simply add or update the field
+                metadata[key] = value
+
+
         url = f"{self._endpoint}/deposit/depositions/{self.deposition_id}"
         headers = {"Content-Type": "application/json"}
-        params = {"access_token": self._token}
         data = {"metadata": metadata}
 
-        response = requests.put(url, params=params, data=json.dumps(data), headers=headers)
+        response = requests.put(url, auth=self._bearer_auth, data=json.dumps(data), headers=headers)
         response.raise_for_status()
 
         self.set_deposition(self.deposition_id)
@@ -435,27 +408,25 @@ class Client(object):
         if remote_filename is None:
             remote_filename = os.path.basename(file_path)
 
-        params = {"access_token": self._token}
-
         if file_id:
             # Update existing file using PUT
             url = f"{self._endpoint}/deposit/depositions/{deposition_id}/files/{file_id}"
             with open(file_path, "rb") as file:
-                response = requests.put(url, params=params, data=file)
+                response = requests.put(url, auth=self._bearer_auth, data=file)
         else:
             # Upload new file using POST
             url = f"{self._endpoint}/deposit/depositions/{deposition_id}/files"
             with open(file_path, "rb") as file:
                 data = {"name": remote_filename}
                 files = {"file": file}
-                response = requests.post(url, params=params, data=data, files=files)
+                response = requests.post(url, auth=self._bearer_auth, data=data, files=files)
 
         response.raise_for_status()
         file_data = response.json()
 
         return file_data
 
-    def get_file_ids(self, deposition_id):
+    def get_file_ids(self, deposition_id=None):
         """
         Retrieves the file IDs for all files in a deposition.
 
@@ -465,6 +436,8 @@ class Client(object):
         Returns:
             dict: A dictionary mapping filenames to their file IDs.
         """
+        if deposition_id is None and self.associated :
+            deposition_id = self.deposition_id
         deposition = self.get_deposition_by_id(deposition_id)
         return {file['filename']: file['id'] for file in deposition.get('files', [])}   
 
@@ -479,53 +452,133 @@ class Client(object):
             dict: The published deposition data.
         """
         url = f"{self._endpoint}/deposit/depositions/{self.deposition_id}/actions/publish"
-        params = {"access_token": self._token}
 
-        response = requests.post(url, params=params)
-        response.raise_for_status()
-        return response.json()
+    
+        try:
+            response = requests.post(url, auth=self._bearer_auth)
+            response.raise_for_status()
+            return True  # If we get here, the request was successful
+        except requests.exceptions.RequestException as e:
+            # Log the error for debugging purposes
+            print(f"Error publishing deposition: {str(e)}")
+            return False  # Return False if any exception occurs
+        except requests.exceptions.HTTPError as err:
+            print(f"HTTP error occurred: {err}")
+            print(f"Response: {response.text}")  # For more detailed error information
+        except KeyError:
+            print("KeyError: Failed to retrieve 'publish' link. Check if the deposition is ready for publication.")
+        except Exception as e:
+            print(f"An error occurred: {e}")
 
-    def modify_metadata(self, metadata_updates):
+    @property 
+    def is_published(self):
+        return self.get_deposition_by_id()['submitted']
+
+    def create_new_version(self):
+        """
+        Creates a new version of an existing deposition.
+        
+        
+        Returns:
+            dict: The new deposition data.
+        """
+        url = f"{self._endpoint}/deposit/depositions/{self.deposition_id}/actions/newversion"
+        
+        try:
+            response = requests.post(url, auth=self._bearer_auth)
+            response.raise_for_status()
+            new_id = response.json()['id']
+            
+             # Wait briefly to allow Zenodo to index the new version
+            time.sleep(2)  # Adjust as necessary
+        
+            self.set_deposition(new_id)
+            return new_id
+        
+        except requests.exceptions.RequestException as e:
+            if hasattr(e, 'response'):
+                print(f"Response content: {e.response.content}")
+            raise
+
+
+    def modify_metadata(self, metadata_updates, **kwargs):
         """
         Modifies metadata of a deposition (published or not).
 
         Args:
-            deposition_id (int): The ID of the deposition.
             metadata_updates (dict): The metadata fields to update.
+            **kwargs: Additional metadata fields to update.
 
         Returns:
             dict: The updated deposition data.
         """
-        # First, get the current metadata
-        current_deposition = self.get_deposition_by_id(self.deposition_id)
+        if not self.associated:
+            print (f'Error in "modify_update" Deposition is not associated !')
+            return None
+        
+        # Check if the deposition is published
+        current_deposition = self.deposition
+        
+        if current_deposition.get('state') == 'done':
+            new_id = self.create_new_version()
+            print(f"New deposition_id {new_id} was created for concept_id {self.concept_id}")
+            current_deposition = self.deposition
 
         current_metadata = current_deposition['metadata']
-
+      
         # Update the metadata
         current_metadata.update(metadata_updates)
 
+        # Update metadata with additional fields from kwargs
+        for key, value in kwargs.items():
+            if isinstance(value, dict):
+                current_metadata[key] = current_metadata.get(key, {})
+                current_metadata[key].update(value)
+            else:
+                current_metadata[key] = value
+
         # Use the create_metadata method to update
-        return self.create_metadata(current_metadata)
+        result = self.create_metadata(current_metadata)
+        return result
 
     def update_file(self, file_id, new_file_path):
         """
         Updates a file in a deposition (published or not).
 
         Args:
-            deposition_id (int): The ID of the deposition.
             file_id (str): The ID of the file to update.
             new_file_path (str): The path to the new file.
 
         Returns:
             dict: The updated file data.
         """
-        # First, delete the existing file
+        # Check if the new file exists
+        if not os.path.exists(new_file_path):
+            raise FileNotFoundError(f"The file {new_file_path} does not exist.")
+
+        # Check if the new file is readable
+        if not os.access(new_file_path, os.R_OK):
+            raise PermissionError(f"No permission to read the file {new_file_path}.")
+
+        # First, try to delete the existing file
         delete_url = f"{self._endpoint}/deposit/depositions/{self.deposition_id}/files/{file_id}"
-        params = {"access_token": self._token}
-        requests.delete(delete_url, params=params).raise_for_status()
+
+        try:
+            delete_response = requests.delete(delete_url, auth=self._bearer_auth)
+            delete_response.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                # File not found, log a warning and continue with upload
+                print(f"Warning: File {file_id} not found. Proceeding with upload.")
+            else:
+                raise Exception(f"Failed to delete existing file: {str(e)}")
 
         # Then, upload the new file
-        return self.upload_file(self.deposition_id, new_file_path)
+        try:
+            return self.upload_file(new_file_path)
+        except Exception as e:
+            raise Exception(f"Failed to upload new file: {str(e)}")
+   
 
     def get_file_ids(self):
         """
@@ -542,39 +595,40 @@ class Client(object):
         return {file['filename']: file['id'] for file in deposition.get('files', [])}
 
 if __name__ == '__main__':
-    zeno = Client(sandbox=True)
+    zcd = Client(sandbox=True)
 
     # Create a new deposition
-    deposition_id = zeno.create_new_deposition()
+    deposition_id = zcd.create_new_deposition()
     
     # Create metadata
     metadata = {
         'title': 'My New Dataset',
         'description': 'This is a test dataset',
-        'creators': [{'name': 'Doe, John', 'affiliation': 'Zenodo'}]
+        'upload_type': 'dataset',
+        'creators': [{'name': 'Doe, John', 'affiliation': 'zcddo'}]
     }
 
 
-    zeno.set_deposition(deposition_id)
+    zcd.set_deposition(deposition_id)
 
-    zeno.create_metadata(metadata)
+    zcd.create_metadata(metadata)
 
     # Upload a file
-    zeno.upload_file('/tmp/eos.zip', 'remote_filename.zip')
+    zcd.upload_file('/tmp/eos.zip', 'remote_filename.zip')
 
     # Publish the deposition
-    #zeno.publish_deposition()
+    #zcd.publish_deposition()
 
     # Modify metadata (even after publishing)
-    zeno.modify_metadata({'title': 'Updated Dataset Title'})
+    zcd.modify_metadata({'title': 'Updated Dataset Title'})
 
     # Update a file (you need the file_id, which you can get from the deposition details)
     file_id = '...'  # You need to retrieve this
-    file_ids = zeno.get_file_ids()
+    file_ids = zcd.get_file_ids()
     for filename, file_id in file_ids.items():
         print(f"File: {filename}, ID: {file_id}")
-        zeno.update_file(file_id, '/tmp/eos2.zip')
+        zcd.update_file(file_id, '/tmp/eos2.zip')
 
 
     # Delete a deposition (only works for unpublished depositions)
-    zeno.delete_deposition(deposition_id)
+    zcd.delete_deposition(deposition_id)
