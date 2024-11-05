@@ -219,6 +219,25 @@ class Client(object):
 
 
 
+    def find_community_identifier(self,community_name):
+        """Find a community id from community name"""
+        params = {
+            "q": community_name,
+            "size": 100  # Adjust as needed
+        }
+
+        response = requests.get(self._endpoint+'/communities', params=params)
+
+        if response.status_code == 200:
+            data = response.json()
+            for community in data['hits']['hits']:
+                if community['metadata']['title'].lower() == community_name.lower():
+                    return community['id']
+
+        return None
+
+
+
     def set_deposition(self, deposition_id=None):
         """
         Sets the client to a specific deposition's latest version using a given deposition_id.
