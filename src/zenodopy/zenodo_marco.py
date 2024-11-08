@@ -613,6 +613,55 @@ class Client(object):
         deposition = self.get_deposition_by_id(self.deposition_id)
         return {file['filename']: file['id'] for file in deposition.get('files', [])}
 
+
+    def title_exists(self, title):
+        """
+        Check if depositions with the given title exist in Zenodo,
+        and return their IDs if found.
+        
+        Args:
+        title (str): The title to search for.
+        
+        Returns:
+        dict: A dictionary containing 'exists' (bool) and 'ids' (list of str)
+        """
+        result = {
+            'exists': False,
+            'ids': []
+        }
+
+        search_url = f"{self._endpoint}/deposit/depositions"
+        params = {
+            'size': 9999  # Adjust this value based on your needs
+        }
+       
+        try:
+            response = requests.get(search_url, params=params, auth=self._bearer_auth)
+            response.raise_for_status()
+            
+            depositions = response.json()
+            for deposition in depositions:
+                if deposition.get('metadata', {}).get('title', '').lower() == title.lower():
+                    result['exists'] = True
+                    deposition_id = deposition.get('id')
+                    result['ids'].append(deposition_id)
+                    status = "published" if deposition.get('submitted', False) else "draft"
+                    print(f"Found {status} deposition with title: {title}, ID: {deposition_id}")
+            
+            if not result['exists']:
+                print(f"No deposition found with title: {title}")
+            elif len(result['ids']) > 1:
+                print(f"Warning: Multiple depositions found with title: {title}")
+
+        except requests.exceptions.RequestException as e:
+            print(f"Error searching depositions: {e}")
+            print(f"Response status code: {e.response.status_code if e.response else 'N/A'}")
+            print(f"Response content: {e.response.text if e.response else 'N/A'}")
+
+        return result
+    
+    
+
 if __name__ == '__main__':
     zcd = Client(sandbox=True)
 
