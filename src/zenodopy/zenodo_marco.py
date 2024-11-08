@@ -371,11 +371,14 @@ class Client(object):
 
         if deposition_id is None : deposition_id = self.deposition_id
 
-        url = f"{self._endpoint}/deposit/depositions/{deposition_id}"
-
-        response = requests.delete(url, auth=self._bearer_auth)
-        response.raise_for_status()
-        if(deposition_id==self.deposition_id) : self.unset_deposition()
+        deposition_id = list(deposition_id)
+        for ii in deposition_id:
+            url = f"{self._endpoint}/deposit/depositions/{ii}"
+            response = requests.delete(url, auth=self._bearer_auth)
+            #response.raise_for_status()
+            if(ii==self.deposition_id) : self.unset_deposition()
+            if response.status_code < 400:
+                print(f"Deposition {ii} deleted")
 
     def create_metadata(self, metadata,  **kwargs):
         """
