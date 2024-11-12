@@ -237,28 +237,26 @@ class Client(object):
         return None
 
 
-
-    def set_deposition(self, deposition_id=None):
+    def set_deposition(self, id_value):
         """
-        Sets the client to a specific deposition's latest version using a given deposition_id.
+        Sets the client to a specific deposition's latest version using a given deposition_id or concept_id.
 
         Args:
-            deposition_id (int): The ID of the deposition to set. It can be 
-            referred also to an old version ... the id will be set to the last one.
+            id_value (int): The ID of the deposition or the concept ID to set.
             
         Raises:
             ValueError: If no valid deposition is found for the given ID.
         """
-        if not deposition_id:
-            raise ValueError("You must provide a deposition_id.")
+        if not id_value:
+            raise ValueError("You must provide an ID.")
 
-        # Retrieve the specific deposition by its ID
-        deposition = self.get_deposition_by_id(deposition_id)
-
-        # Get the concept ID from the retrieved deposition
-        concept_id = deposition.get('conceptrecid')
-        if not concept_id:
-            raise ValueError(f"No concept ID found for deposition ID {deposition_id}.")
+        # First, try to retrieve the deposition directly
+        try:
+            deposition = self.get_deposition_by_id(id_value)
+            concept_id = deposition.get('conceptrecid')
+        except requests.exceptions.HTTPError:
+            # If that fails, assume it's a concept ID
+            concept_id = id_value
 
         # Retrieve the latest version of the deposition using concept ID
         url = f"{self._endpoint}/deposit/depositions"
@@ -273,7 +271,7 @@ class Client(object):
         depositions = response.json()
 
         if not depositions:
-            raise ValueError(f"No depositions found for concept ID {concept_id}.")
+            raise ValueError(f"No depositions found for ID {id_value}.")
         
         latest_deposition = depositions[0]
 
@@ -284,6 +282,54 @@ class Client(object):
         self.deposition_id = latest_deposition['id']
         self.concept_id = latest_deposition['conceptrecid']
         self.associated = True
+
+
+    # def set_deposition(self, deposition_id=None):
+    #     """
+    #     Sets the client to a specific deposition's latest version using a given deposition_id.
+
+    #     Args:
+    #         deposition_id (int): The ID of the deposition to set. It can be 
+    #         referred also to an old version ... the id will be set to the last one.
+            
+    #     Raises:
+    #         ValueError: If no valid deposition is found for the given ID.
+    #     """
+    #     if not deposition_id:
+    #         raise ValueError("You must provide a deposition_id.")
+
+    #     # Retrieve the specific deposition by its ID
+    #     deposition = self.get_deposition_by_id(deposition_id)
+
+    #     # Get the concept ID from the retrieved deposition
+    #     concept_id = deposition.get('conceptrecid')
+    #     if not concept_id:
+    #         raise ValueError(f"No concept ID found for deposition ID {deposition_id}.")
+
+    #     # Retrieve the latest version of the deposition using concept ID
+    #     url = f"{self._endpoint}/deposit/depositions"
+    #     params = {
+    #         "q": f"conceptrecid:{concept_id}",
+    #         "sort": "mostrecent",
+    #         "size": 1
+    #     }
+        
+    #     response = requests.get(url, auth=self._bearer_auth, params=params)
+    #     response.raise_for_status()
+    #     depositions = response.json()
+
+    #     if not depositions:
+    #         raise ValueError(f"No depositions found for concept ID {concept_id}.")
+        
+    #     latest_deposition = depositions[0]
+
+    #     # Set class variables based on the latest version of the deposition
+    #     self.title = latest_deposition['metadata'].get('title', None)
+    #     self.bucket = latest_deposition['links'].get('bucket', 'N/A')
+        
+    #     self.deposition_id = latest_deposition['id']
+    #     self.concept_id = latest_deposition['conceptrecid']
+    #     self.associated = True
 
    
     def unset_deposition(self):
@@ -351,7 +397,7 @@ class Client(object):
         Creates a new deposition.
 
         Returns:
-            dict: The newly created deposition data.
+            int: The ID of the newly created deposition.
         """
         url = f"{self._endpoint}/deposit/depositions"
         headers = {"Content-Type": "application/json"}
@@ -359,7 +405,8 @@ class Client(object):
         response = requests.post(url, auth=self._bearer_auth, json={}, headers=headers)
         response.raise_for_status()
 
-        return response.json().get("id",None)
+        deposition_data = response.json()
+        return deposition_data['id']
 
     def delete_deposition(self, deposition_id=None):
         """
@@ -371,7 +418,9 @@ class Client(object):
 
         if deposition_id is None : deposition_id = self.deposition_id
 
-        deposition_id = list(deposition_id)
+        if not type(deposition_id)==list :
+            deposition_id = [deposition_id]
+        
         for ii in deposition_id:
             url = f"{self._endpoint}/deposit/depositions/{ii}"
             response = requests.delete(url, auth=self._bearer_auth)
@@ -391,7 +440,9 @@ class Client(object):
         Returns:
             dict: The updated deposition data.
         """
-
+        if not self.associated: 
+            print("create_metadata: deposition is not associated.")
+            return 
         # Update metadata with additional fields from kwargs
         for key, value in kwargs.items():
             if isinstance(value, dict):
@@ -410,7 +461,6 @@ class Client(object):
         response = requests.put(url, auth=self._bearer_auth, data=json.dumps(data), headers=headers)
         response.raise_for_status()
 
-        self.set_deposition(self.deposition_id)
         return response.json()
 
     def upload_file(self,file_path, remote_filename=None, file_id=None):
