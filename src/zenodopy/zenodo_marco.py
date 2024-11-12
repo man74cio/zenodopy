@@ -263,13 +263,23 @@ class Client(object):
         params = {
             "q": f"conceptrecid:{concept_id}",
             "sort": "mostrecent",
-            "size": 1
+            "size": 1,
         }
         
+        # hack to the problem that the deposition_id is not created instantaneously on the server
+        n_try = 8
         response = requests.get(url, auth=self._bearer_auth, params=params)
-        response.raise_for_status()
         depositions = response.json()
+        while not depositions and n_try > 0:
+            response = requests.get(url, auth=self._bearer_auth, params=params)
+            depositions = response.json()  
+            time.sleep(1)
+            n_try -=1
 
+        response.raise_for_status()
+            
+        
+        
         if not depositions:
             raise ValueError(f"No depositions found for ID {id_value}.")
         
@@ -481,6 +491,7 @@ class Client(object):
             remote_filename = os.path.basename(file_path)
 
         if file_id:
+            print("this functionality does not work at moment on Zenodo!!")
             # Update existing file using PUT
             url = f"{self._endpoint}/deposit/depositions/{deposition_id}/files/{file_id}"
             with open(file_path, "rb") as file:
@@ -493,6 +504,8 @@ class Client(object):
                 files = {"file": file}
                 response = requests.post(url, auth=self._bearer_auth, data=data, files=files)
 
+        print(response.status_code)
+        print(response.text)
         response.raise_for_status()
         file_data = response.json()
 
@@ -613,24 +626,28 @@ class Client(object):
         result = self.create_metadata(current_metadata)
         return result
 
-    def update_file(self, file_id, new_file_path):
+    def update_file(self, file_path,remote_filename=None):
         """
         Updates a file in a deposition (published or not).
 
         Args:
-            file_id (str): The ID of the file to update.
-            new_file_path (str): The path to the new file.
+            file_path (str): The path to the new file.
+            remote_filename (str) : The remote name.
 
         Returns:
             dict: The updated file data.
         """
+
+        print(self.get_file_ids())
+        file_id = self.get_file_ids()[remote_filename]
+
         # Check if the new file exists
-        if not os.path.exists(new_file_path):
-            raise FileNotFoundError(f"The file {new_file_path} does not exist.")
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"The file {file_path} does not exist.")
 
         # Check if the new file is readable
-        if not os.access(new_file_path, os.R_OK):
-            raise PermissionError(f"No permission to read the file {new_file_path}.")
+        if not os.access(file_path, os.R_OK):
+            raise PermissionError(f"No permission to read the file {file_path}.")
 
         # First, try to delete the existing file
         delete_url = f"{self._endpoint}/deposit/depositions/{self.deposition_id}/files/{file_id}"
@@ -647,7 +664,7 @@ class Client(object):
 
         # Then, upload the new file
         try:
-            return self.upload_file(new_file_path)
+            return self.upload_file(file_path=file_path,remote_filename=remote_filename)
         except Exception as e:
             raise Exception(f"Failed to upload new file: {str(e)}")
    
@@ -713,7 +730,30 @@ class Client(object):
 
         return result
     
-    
+    def get_metadata(self,dep_id: str=None):
+        """
+        Retrieves the current metadata of a deposition on Zenodo.
+
+        Args:
+            dep_id (str): The ID of the deposition.
+
+        Returns:
+            response (dict): The current metadata from the Zenodo API.
+        """
+        if dep_id is None :
+            dep_id = self.deposition_id
+        url = f"{self._endpoint}/deposit/depositions/{dep_id}"
+
+        # Fetch the existing metadata
+        response = requests.get(url, auth=self._bearer_auth)
+
+        if response.status_code == 200:
+            return response.json()["metadata"]
+        else:
+            print(f"Failed to fetch metadata. Status code: {response.status_code}")
+            return None
+
+
 
 if __name__ == '__main__':
     zcd = Client(sandbox=True)
