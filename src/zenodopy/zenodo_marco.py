@@ -294,53 +294,6 @@ class Client(object):
         self.associated = True
 
 
-    # def set_deposition(self, deposition_id=None):
-    #     """
-    #     Sets the client to a specific deposition's latest version using a given deposition_id.
-
-    #     Args:
-    #         deposition_id (int): The ID of the deposition to set. It can be 
-    #         referred also to an old version ... the id will be set to the last one.
-            
-    #     Raises:
-    #         ValueError: If no valid deposition is found for the given ID.
-    #     """
-    #     if not deposition_id:
-    #         raise ValueError("You must provide a deposition_id.")
-
-    #     # Retrieve the specific deposition by its ID
-    #     deposition = self.get_deposition_by_id(deposition_id)
-
-    #     # Get the concept ID from the retrieved deposition
-    #     concept_id = deposition.get('conceptrecid')
-    #     if not concept_id:
-    #         raise ValueError(f"No concept ID found for deposition ID {deposition_id}.")
-
-    #     # Retrieve the latest version of the deposition using concept ID
-    #     url = f"{self._endpoint}/deposit/depositions"
-    #     params = {
-    #         "q": f"conceptrecid:{concept_id}",
-    #         "sort": "mostrecent",
-    #         "size": 1
-    #     }
-        
-    #     response = requests.get(url, auth=self._bearer_auth, params=params)
-    #     response.raise_for_status()
-    #     depositions = response.json()
-
-    #     if not depositions:
-    #         raise ValueError(f"No depositions found for concept ID {concept_id}.")
-        
-    #     latest_deposition = depositions[0]
-
-    #     # Set class variables based on the latest version of the deposition
-    #     self.title = latest_deposition['metadata'].get('title', None)
-    #     self.bucket = latest_deposition['links'].get('bucket', 'N/A')
-        
-    #     self.deposition_id = latest_deposition['id']
-    #     self.concept_id = latest_deposition['conceptrecid']
-    #     self.associated = True
-
    
     def unset_deposition(self):
         """
@@ -504,8 +457,6 @@ class Client(object):
                 files = {"file": file}
                 response = requests.post(url, auth=self._bearer_auth, data=data, files=files)
 
-        print(response.status_code)
-        print(response.text)
         response.raise_for_status()
         file_data = response.json()
 
@@ -525,6 +476,14 @@ class Client(object):
             deposition_id = self.deposition_id
         deposition = self.get_deposition_by_id(deposition_id)
         return {file['filename']: file['id'] for file in deposition.get('files', [])}   
+
+
+    def get_doi(self,deposition_id=None):
+        if deposition_id is None and self.associated :
+            deposition_id = self.deposition_id
+        deposition = self.get_deposition_by_id(deposition_id)
+        return deposition.get('doi',None)
+
 
     def publish_deposition(self):
         """
@@ -574,8 +533,8 @@ class Client(object):
             response.raise_for_status()
             new_id = response.json()['id']
             
-             # Wait briefly to allow Zenodo to index the new version
-            time.sleep(2)  # Adjust as necessary
+            # Wait briefly to allow Zenodo to index the new version
+            # time.sleep(2)  # Adjust as necessary
         
             self.set_deposition(new_id)
             return new_id
@@ -610,9 +569,10 @@ class Client(object):
             current_deposition = self.deposition
 
         current_metadata = current_deposition['metadata']
-      
+
         # Update the metadata
         current_metadata.update(metadata_updates)
+        
 
         # Update metadata with additional fields from kwargs
         for key, value in kwargs.items():
@@ -638,7 +598,10 @@ class Client(object):
             dict: The updated file data.
         """
 
-        print(self.get_file_ids())
+        if self.is_published : 
+            print("Deposition is published. Before to update file please create a new version")
+            return 
+
         file_id = self.get_file_ids()[remote_filename]
 
         # Check if the new file exists
