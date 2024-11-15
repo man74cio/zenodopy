@@ -422,6 +422,8 @@ class Client(object):
         data = {"metadata": metadata}
 
         response = requests.put(url, auth=self._bearer_auth, data=json.dumps(data), headers=headers)
+        if response.status_code >= 500:
+            self.delete_deposition()
         response.raise_for_status()
 
         return response.json()
